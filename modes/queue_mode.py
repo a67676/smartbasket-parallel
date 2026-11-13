@@ -1,1 +1,1 @@
-# Member 4: lock and lock_batched modes
+# Member 5: queue mode
