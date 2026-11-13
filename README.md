@@ -39,7 +39,8 @@ Every mode file contains this function:
 - `basket`, `catalogs`: the inputs from `generate_data()` (already created, not timed)
 - `p`: number of worker processes
 - `result`: a dictionary with the keys listed in rule 3
-
+  
+Exception: modes/lock.py contains two functions with this signature, run_lock() and run_lock_batched().
 Do **not** time anything inside `run()`. `smartbasket_parallel.py` times the whole call.
 
 ### 2. Reuse the existing code, never copy it
@@ -77,7 +78,8 @@ reduction). Never recompute them from `matched` at the end, or the race disappea
 `smartbasket_parallel.py` prints one line per run. Do not print anything else from your mode.
 
     MODE=lock P=4 RUN=1 TIME=1.2345 CHECK=CORRECT COMPARISONS=800000
-
+When CHECK=WRONG, a FAILED= field lists the wrong keys, e.g.                         FAILED=comparisons,totals. 
+Add --csv results/runs.csv to save every run to a CSV file.
 `CHECK` is `CORRECT` when every key in rule 3 matches the sequential result
 (prices compared with a tolerance of 1e-9), otherwise `WRONG`.
 
