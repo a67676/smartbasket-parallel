@@ -1,14 +1,11 @@
+
 # Members 2 and 3: unsynchronised mode (shared variables, race conditions)
 #
 # Member 2 (Razan): shared variable comparison_counter.
-#   Every worker adds 1 to it for every Jaccard calculation, with NO lock.
-#   counter.value += 1 is three steps (read, add, write), so two processes can
-#   read the same value and one update is lost. The final count is then
-#   below the correct value (N x M x C = 800,000 by default).
-#
-# Member 3: add store_totals and cheapest_price / cheapest_store below.
+# Member 3: store_totals and cheapest_price / cheapest_store.
 
-from multiprocessing import Value
+from multiprocessing import Value, Array
+import math
 
 import common
 
@@ -17,13 +14,33 @@ def _worker(pair):
     i, s = pair
     shared = common.get_shared()
 
-    # match one (item, store) pair with the Stage 1 best_match()
+    # match one (item, store) pair with Stage 1 best_match()
     best_listing, n_comparisons = common.match_pair(i, s)
 
-    # RACE: +1 for every Jaccard calculation, without a lock
+    # Member 2: comparison counter race
     counter = shared["comparison_counter"]
     for _ in range(n_comparisons):
-        counter.value += 1          # read -> add 1 -> write (not atomic)
+        counter.value += 1
+
+    # Member 3: shared store totals race
+    cost = common.line_cost(i, s, best_listing)
+
+    if cost is not None:
+        totals = shared["store_totals"]
+        totals[s] += cost
+
+        # Member 3: cheapest price/store race
+        price = common.unit_price(s, best_listing)
+        cheapest_price = shared["cheapest_price"]
+        cheapest_store = shared["cheapest_store"]
+
+        current_price = cheapest_price[i]
+        current_store = cheapest_store[i]
+
+        # Check-then-act without a lock
+        if (price, s) < (current_price, current_store):
+            cheapest_price[i] = price
+            cheapest_store[i] = s
 
     return i, s, best_listing
 
@@ -31,32 +48,46 @@ def _worker(pair):
 def run(basket, catalogs, p):
     n = len(basket)
     m = len(catalogs)
+
     item_grams, indexes = common.build_inputs(basket, catalogs)
 
-    # shared variable, created inside run() and sent to the workers
-    shared = {"comparison_counter": Value("i", 0)}
+    # Shared variables created inside run()
+    shared = {
+        "comparison_counter": Value("i", 0),
+        "store_totals": Array("d", [0.0] * m),
+        "cheapest_price": Array("d", [math.inf] * n),
+        "cheapest_store": Array("i", [m] * n),
+    }
 
     pairs = common.make_pairs(n, m)
-    with common.make_pool(p, basket, catalogs, item_grams, indexes, shared) as pool:
-        results = pool.map(_worker, pairs, chunksize=common.chunk_size(len(pairs), p))
+
+    with common.make_pool(
+        p, basket, catalogs, item_grams, indexes, shared
+    ) as pool:
+        results = pool.map(
+            _worker,
+            pairs,
+            chunksize=common.chunk_size(len(pairs), p),
+        )
 
     matched = [[None] * m for _ in range(n)]
     for i, s, best_listing in results:
         matched[i][s] = best_listing
 
     comparisons = shared["comparison_counter"].value
+    totals = list(shared["store_totals"])
 
-    # TEMPORARY (until Member 3 adds her shared variables):
-    # totals and cheapest are computed here in the parent, so they are correct.
-    totals = [0] * m
-    cheapest = [None] * n
+    cheapest = []
     for i in range(n):
-        for s in range(m):
-            listing = catalogs[s][matched[i][s]]
-            if listing["available"]:
-                totals[s] += listing["price"] * basket[i]["qty"]
-                if cheapest[i] is None or (listing["price"], s) < cheapest[i]:
-                    cheapest[i] = (listing["price"], s)
+        price = shared["cheapest_price"][i]
+        store = shared["cheapest_store"][i]
 
-    return common.finish(basket, catalogs, matched, comparisons, totals, cheapest)
+        if math.isinf(price):
+            cheapest.append(None)
+        else:
+            cheapest.append((price, store))
+
+    return common.finish(
+        basket, catalogs, matched, comparisons, totals, cheapest
+    )
 
