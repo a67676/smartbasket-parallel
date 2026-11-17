@@ -173,6 +173,16 @@ def main():
             line += f" FAILED={','.join(failed)}"
         print(line)
 
+        if a.mode == "nosync":
+            for key in ("totals", "cheapest"):
+                expected = ref[key]
+                actual = result[key]
+
+                print(f"  VARIABLE: {key}")
+                print(f"  EXPECTED: {expected}")
+                print(f"  ACTUAL:   {actual}")
+                print(f"  STATUS: {'WRONG' if key in failed else 'CORRECT'}")
+
         if a.csv:
             new_file = not os.path.exists(a.csv)
             with open(a.csv, "a", newline="") as f:
