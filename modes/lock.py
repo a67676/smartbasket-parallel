@@ -59,8 +59,9 @@ def _worker_lock(pair):
 
     listing, n_comp = match_pair(i, s)      # the heavy work, no shared state touched
 
-    with lock:                              # update 1: comparison counter
-        sh["comparisons"].value += n_comp
+    for _ in range(n_comp):                 # update 1: comparison counter, +1 per comparison
+        with lock:                          # (same 800,000 updates as nosync, each one locked)
+            sh["comparisons"].value += 1
 
     cost = line_cost(i, s, listing)
     if cost is not None:                    # item available in this store
